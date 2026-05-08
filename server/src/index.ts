@@ -1,14 +1,34 @@
+import './env.js'    // Must be first: loads .env into process.env before any consumer reads it.
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import { ZodError } from 'zod'
 import './db.js'
 import { wordsRoutes } from './routes/words.js'
 import { progressRoutes } from './routes/progress.js'
+import { authRoutes } from './routes/auth.js'
+import { aiRoutes } from './routes/ai.js'
+import { registerAuthHook } from './auth.js'
 
 const app = Fastify({ logger: true })
 
-await app.register(cors, { origin: true })
+await app.register(cors, { origin: true, credentials: true })
+
+app.setErrorHandler((err, _req, reply) => {
+  if (err instanceof ZodError) {
+    return reply.code(400).send({
+      error: 'invalid input',
+      issues: err.issues.map((i) => ({ path: i.path, message: i.message })),
+    })
+  }
+  reply.send(err)
+})
+
+registerAuthHook(app)
+
+await app.register(authRoutes)
 await app.register(wordsRoutes)
 await app.register(progressRoutes)
+await app.register(aiRoutes)
 
 app.get('/api/health', async () => ({ ok: true }))
 

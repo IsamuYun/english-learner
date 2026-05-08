@@ -7,7 +7,6 @@ import type {
 import { essaysApi, flashcardsApi, readingApi, settingsApi } from './api'
 
 export const defaultSettings: AppSettings = {
-  apiKey: '',
   voice: '',
   rate: 0.95,
 }
@@ -93,10 +92,15 @@ export const essayStore = {
 }
 
 // ---------- hydration ----------
-let hydrated = false
+export function resetCaches(): void {
+  settingsCache = { ...defaultSettings }
+  flashcardCache = {}
+  readingCache = []
+  essayCache = {}
+  notify()
+}
+
 export async function hydrate(): Promise<void> {
-  if (hydrated) return
-  hydrated = true
   try {
     const [s, fc, re, es] = await Promise.all([
       settingsApi.get().catch(() => ({})),

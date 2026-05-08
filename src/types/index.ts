@@ -92,7 +92,6 @@ export interface ReadingResult {
 }
 
 export interface AppSettings {
-  apiKey: string
   voice: string // preferred voice URI
   rate: number // TTS rate
 }

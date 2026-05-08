@@ -8,12 +8,59 @@ import type {
 } from '../types'
 
 const BASE = ''
+const TOKEN_KEY = 'english.auth.token'
+
+let authToken: string | null = null
+const unauthListeners = new Set<() => void>()
+
+export function getAuthToken(): string | null {
+  if (authToken !== null) return authToken
+  try {
+    authToken = localStorage.getItem(TOKEN_KEY)
+  } catch {
+    authToken = null
+  }
+  return authToken
+}
+
+export function setAuthToken(token: string | null): void {
+  authToken = token
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* noop */
+  }
+}
+
+export function onUnauthorized(fn: () => void): () => void {
+  unauthListeners.add(fn)
+  return () => unauthListeners.delete(fn)
+}
+
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  })
+  const headers: Record<string, string> = {
+    ...((init?.headers as Record<string, string>) ?? {}),
+  }
+  if (init?.body !== undefined && init.body !== null && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json'
+  }
+  const token = getAuthToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const res = await fetch(BASE + path, { ...init, headers })
+  if (res.status === 401) {
+    setAuthToken(null)
+    for (const fn of unauthListeners) fn()
+  }
   if (!res.ok) {
     let detail = ''
     try {
@@ -21,7 +68,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* noop */
     }
-    throw new Error(`${res.status} ${res.statusText} ${detail}`.trim())
+    throw new ApiError(res.status, `${res.status} ${res.statusText} ${detail}`.trim())
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -193,4 +240,92 @@ export const settingsApi = {
   get: () => request<Partial<AppSettings>>('/api/settings'),
   put: (s: Partial<AppSettings>) =>
     request<Partial<AppSettings>>('/api/settings', { method: 'PUT', body: JSON.stringify(s) }),
+}
+
+export interface AuthUser {
+  id: number
+  username: string
+  displayName: string
+  createdAt: number
+}
+
+interface AuthResponse {
+  token: string
+  expiresAt: number
+  user: AuthUser
+}
+
+export const authApi = {
+  register: (data: { username: string; password: string; displayName?: string }) =>
+    request<AuthResponse>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  login: (data: { username: string; password: string }) =>
+    request<AuthResponse>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
+  me: () => request<{ user: AuthUser }>('/api/auth/me'),
+}
+
+export interface LearningStats {
+  totalWords: number
+  seenWords: number
+  knownWords: number
+  masteredWords: number
+  byLevel: { level: number; total: number; seen: number; known: number }[]
+  essayCount: number
+  reading: { attempts: number; correct: number; total: number }
+}
+
+export const statsApi = {
+  get: () => request<LearningStats>('/api/stats'),
+}
+
+export interface AiStatus {
+  enabled: boolean
+  model: string
+}
+
+export const aiApi = {
+  status: () => request<AiStatus>('/api/ai/status'),
+  sentence: (data: {
+    word: { word: string; pos: string; zh: string }
+    sentence: string
+  }) =>
+    request<unknown>('/api/ai/sentence', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  conversation: (data: { zhPrompt: string; hintEn: string; userEn: string }) =>
+    request<unknown>('/api/ai/conversation', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  reading: (data: {
+    passageBody: string
+    question: string
+    studentChoice: string
+    correctAnswer: string
+  }) =>
+    request<{ explanation: string }>('/api/ai/reading', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  essay: (data: {
+    prompt: {
+      week: number
+      title: string
+      enBrief: string
+      minWords: number
+      maxWords: number
+    }
+    text: string
+  }) =>
+    request<unknown>('/api/ai/essay', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 }

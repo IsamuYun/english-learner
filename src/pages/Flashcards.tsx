@@ -6,7 +6,7 @@ import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import { useWords } from '../lib/useWords'
 import { listen, speak, speechRecognitionAvailable, stopSpeaking } from '../lib/speech'
-import { evaluateSentence } from '../lib/claude'
+import { evaluateSentence } from '../lib/ai'
 import { flashcardStore, settingsStore } from '../lib/storage'
 import type { SentenceEvaluation } from '../types'
 

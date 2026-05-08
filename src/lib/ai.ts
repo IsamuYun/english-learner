@@ -1,6 +1,9 @@
-// Calls Anthropic Claude API directly from the browser.
-// Requires a user-supplied API key in Settings. When no key is present we return null,
-// and callers fall back to a basic heuristic so the app still works offline.
+// Thin client for AI features. Calls go through `/api/ai/*` on our backend,
+// which proxies to Google Gemini using a project-level API key from
+// `server/.env`. The browser never holds the key.
+//
+// On any non-2xx (including 503 "ai-not-configured") or network failure we
+// fall back to the local heuristic so the app stays usable offline.
 
 import type {
   EssayFeedback,
@@ -8,62 +11,26 @@ import type {
   SentenceEvaluation,
   VocabWord,
 } from '../types'
-import { settingsStore } from './storage'
+import { aiApi } from './api'
 
-const ENDPOINT = 'https://api.anthropic.com/v1/messages'
-const MODEL = 'claude-haiku-4-5-20251001'
+// ============================================================
+// Status (cached for the app session)
+// ============================================================
 
-interface AnthropicMessage {
-  role: 'user' | 'assistant'
-  content: string
+let statusCache: Promise<boolean> | null = null
+
+export function getAiEnabled(): Promise<boolean> {
+  if (!statusCache) {
+    statusCache = aiApi
+      .status()
+      .then((r) => r.enabled)
+      .catch(() => false)
+  }
+  return statusCache
 }
 
-async function callClaude(system: string, messages: AnthropicMessage[]): Promise<string | null> {
-  const key = settingsStore.get().apiKey
-  if (!key) return null
-  try {
-    const res = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 1024,
-        system,
-        messages,
-      }),
-    })
-    if (!res.ok) {
-      const t = await res.text()
-      console.warn('Claude API error', res.status, t)
-      return null
-    }
-    const data = await res.json()
-    const txt = data?.content?.[0]?.text
-    return typeof txt === 'string' ? txt : null
-  } catch (e) {
-    console.warn('Claude API exception', e)
-    return null
-  }
-}
-
-function extractJson<T>(text: string): T | null {
-  if (!text) return null
-  // Strip code fences
-  const cleaned = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim()
-  // Find first { and last }
-  const start = cleaned.indexOf('{')
-  const end = cleaned.lastIndexOf('}')
-  if (start === -1 || end === -1) return null
-  try {
-    return JSON.parse(cleaned.slice(start, end + 1)) as T
-  } catch {
-    return null
-  }
+export function clearAiStatusCache(): void {
+  statusCache = null
 }
 
 // ============================================================
@@ -74,27 +41,14 @@ export async function evaluateSentence(
   word: VocabWord,
   sentence: string,
 ): Promise<SentenceEvaluation> {
-  const system = `You are an experienced teacher of English to Chinese high-school students preparing for the Shanghai gaokao. Be supportive but precise. Reply with strict JSON only — no markdown, no code fences.`
-  const user = `The student is practising the word "${word.word}" (${word.pos}, "${word.zh}").
-They wrote this sentence:
-
-"""${sentence}"""
-
-Evaluate the sentence. Return strict JSON with this shape:
-{
-  "score": <integer 0-100>,
-  "verdict": "excellent" | "good" | "okay" | "needs-work",
-  "comments": ["short bullet 1 (in Chinese)", "short bullet 2 (in Chinese)"],
-  "corrections": "<the sentence with grammar / word-choice fixes, or empty string if perfect>",
-  "natural": "<a more natural native-speaker phrasing>"
-}
-
-Score rubric: correctness of using "${word.word}" (40), grammar (30), naturalness (20), richness (10).`
-
-  const raw = await callClaude(system, [{ role: 'user', content: user }])
-  if (raw) {
-    const parsed = extractJson<SentenceEvaluation>(raw)
-    if (parsed && typeof parsed.score === 'number') return parsed
+  try {
+    const r = (await aiApi.sentence({
+      word: { word: word.word, pos: word.pos, zh: word.zh },
+      sentence,
+    })) as SentenceEvaluation
+    if (r && typeof r.score === 'number') return r
+  } catch {
+    /* fall through to heuristic */
   }
   return heuristicSentenceEval(word, sentence)
 }
@@ -157,25 +111,11 @@ export async function evaluateConversationTurn(
   hintEn: string,
   userEn: string,
 ): Promise<ConversationFeedback> {
-  const system = `You are a friendly oral-English coach for Chinese high-school students. Reply with strict JSON only.`
-  const user = `The student should express this Chinese meaning in English:
-"""${zhPrompt}"""
-
-A reference answer is: "${hintEn}"
-
-The student said: "${userEn}"
-
-Return strict JSON:
-{
-  "score": <integer 0-100>,
-  "verdict": "excellent" | "good" | "okay" | "needs-work",
-  "comments": ["<short Chinese bullet>", "..."],
-  "better": "<a polished English version the student can imitate>"
-}`
-  const raw = await callClaude(system, [{ role: 'user', content: user }])
-  if (raw) {
-    const parsed = extractJson<ConversationFeedback>(raw)
-    if (parsed && typeof parsed.score === 'number') return parsed
+  try {
+    const r = (await aiApi.conversation({ zhPrompt, hintEn, userEn })) as ConversationFeedback
+    if (r && typeof r.score === 'number') return r
+  } catch {
+    /* fall through */
   }
   return heuristicConversationEval(hintEn, userEn)
 }
@@ -223,9 +163,12 @@ export async function explainReading(
   studentChoice: string,
   correctAnswer: string,
 ): Promise<string | null> {
-  const system = `You are a calm reading-comprehension tutor. Use Chinese, 2-3 short sentences max.`
-  const user = `Passage:\n"""${passageBody}"""\n\nQuestion: ${question}\nThe correct answer is: ${correctAnswer}\nThe student picked: ${studentChoice}\n\nIn Chinese, briefly explain why the correct answer fits and why the student's choice is wrong (if different).`
-  return callClaude(system, [{ role: 'user', content: user }])
+  try {
+    const r = await aiApi.reading({ passageBody, question, studentChoice, correctAnswer })
+    return r.explanation ?? null
+  } catch {
+    return null
+  }
 }
 
 // ============================================================
@@ -233,28 +176,20 @@ export async function explainReading(
 // ============================================================
 
 export async function gradeEssay(prompt: EssayPrompt, text: string): Promise<EssayFeedback> {
-  const system = `You are a senior English teacher familiar with Shanghai gaokao essay rubrics. Be encouraging and concrete. Reply with strict JSON only.`
-  const user = `Topic (week ${prompt.week}): ${prompt.title}
-Brief: ${prompt.enBrief}
-Word range: ${prompt.minWords}–${prompt.maxWords}
-
-Student essay:
-"""${text}"""
-
-Return strict JSON:
-{
-  "scoreOverall": <0-100>,
-  "scoreContent": <0-100>,
-  "scoreLanguage": <0-100>,
-  "scoreStructure": <0-100>,
-  "strengths": ["<Chinese bullet>", "..."],
-  "improvements": ["<Chinese bullet, concrete and actionable>", "..."],
-  "revised": "<a polished English version, similar length>"
-}`
-  const raw = await callClaude(system, [{ role: 'user', content: user }])
-  if (raw) {
-    const parsed = extractJson<EssayFeedback>(raw)
-    if (parsed && typeof parsed.scoreOverall === 'number') return parsed
+  try {
+    const r = (await aiApi.essay({
+      prompt: {
+        week: prompt.week,
+        title: prompt.title,
+        enBrief: prompt.enBrief,
+        minWords: prompt.minWords,
+        maxWords: prompt.maxWords,
+      },
+      text,
+    })) as EssayFeedback
+    if (r && typeof r.scoreOverall === 'number') return r
+  } catch {
+    /* fall through */
   }
   return heuristicEssayGrade(prompt, text)
 }
@@ -281,7 +216,7 @@ function heuristicEssayGrade(prompt: EssayPrompt, text: string): EssayFeedback {
       inRange
         ? '尝试加入更多衔接词（However, In addition, As a result）让段落更连贯。'
         : `字数应在 ${prompt.minWords}–${prompt.maxWords} 之间，目前为 ${wc}。`,
-      '配置 API Key 后可获得 AI 全面批改与范文。',
+      'AI 暂未启用，配置好服务端 GEMINI_API_KEY 后可获得全面批改与范文。',
     ],
     revised: '',
   }

@@ -1,6 +1,7 @@
-import { ReactNode } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import Icon from './Icon'
+import { useAuth } from '../lib/auth'
 
 interface NavItem {
   to: string
@@ -18,8 +19,10 @@ const NAV: NavItem[] = [
   { to: '/settings', label: '设置', icon: 'settings' },
 ]
 
-export default function Layout({ children }: { children: ReactNode }) {
+export default function Layout() {
   const { pathname } = useLocation()
+  const { user, logout } = useAuth()
+  const [menuOpen, setMenuOpen] = useState(false)
   return (
     <div className="min-h-full flex flex-col">
       <header className="sticky top-0 z-30 glass border-b border-line-soft">
@@ -51,11 +54,51 @@ export default function Layout({ children }: { children: ReactNode }) {
               </NavLink>
             ))}
           </nav>
+          {user ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMenuOpen((v) => !v)}
+                onBlur={() => window.setTimeout(() => setMenuOpen(false), 120)}
+                className="h-9 px-2.5 inline-flex items-center gap-2 rounded-lg text-[13px] text-ink-700 hover:bg-surface-alt"
+              >
+                <span className="w-6 h-6 rounded-full bg-accent-soft text-accent text-[12px] font-semibold inline-flex items-center justify-center">
+                  {user.displayName.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="hidden md:inline max-w-[8rem] truncate">{user.displayName}</span>
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-11 min-w-[12rem] rounded-xl bg-surface hairline shadow-card py-1 z-40">
+                  <div className="px-3 py-2 text-[12px] text-ink-400">@{user.username}</div>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      void logout()
+                    }}
+                    className="w-full text-left px-3 py-2 text-[13px] text-ink-700 hover:bg-surface-alt"
+                  >
+                    退出登录
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Link
+              to="/login"
+              className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-ink-900 text-white text-[13px] font-medium hover:bg-ink-700 transition-colors"
+            >
+              登录
+              <Icon name="arrow-right" size={14} />
+            </Link>
+          )}
         </div>
       </header>
 
       <main key={pathname} className="flex-1 animate-fadeIn">
-        <div className="max-w-6xl mx-auto px-6 py-8 md:py-12">{children}</div>
+        <div className="max-w-6xl mx-auto px-6 py-8 md:py-12">
+          <Outlet />
+        </div>
       </main>
 
       {/* Mobile bottom nav */}

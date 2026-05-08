@@ -5,8 +5,11 @@ import Icon from '../components/Icon'
 import { ESSAY_PROMPTS } from '../data/essayPrompts'
 import { READING_PASSAGES } from '../data/readingPassages'
 import { CONVERSATION_SCENARIOS } from '../data/conversationScenarios'
-import { essayStore, flashcardStore, readingStore, settingsStore, subscribe } from '../lib/storage'
+import { essayStore, flashcardStore, readingStore, subscribe } from '../lib/storage'
 import { useWords } from '../lib/useWords'
+import { statsApi, type LearningStats } from '../lib/api'
+import { getAiEnabled } from '../lib/ai'
+import { useAuth } from '../lib/auth'
 
 interface ModuleCard {
   to: string
@@ -57,10 +60,31 @@ export default function Home() {
   useEffect(() => subscribe(() => force((v) => v + 1)), [])
 
   const { total: vocabTotal, words: previewWords } = useWords({ pageSize: 50 })
+  const { user, status } = useAuth()
+  const isAuthed = status === 'authenticated'
+
+  const [serverStats, setServerStats] = useState<LearningStats | null>(null)
+  useEffect(() => {
+    if (!isAuthed) {
+      setServerStats(null)
+      return
+    }
+    let cancelled = false
+    statsApi
+      .get()
+      .then((s) => {
+        if (!cancelled) setServerStats(s)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthed])
 
   const stats = useMemo(() => {
     const fc = flashcardStore.get()
     const knownCount = Object.values(fc).filter((p) => p.bucket >= 3).length
+    const seenCount = Object.values(fc).filter((p) => p.seen > 0).length
     const reading = readingStore.list()
     const recent = reading.slice(0, 5)
     const accuracy =
@@ -73,11 +97,25 @@ export default function Home() {
         : null
     const essays = essayStore.all()
     const essaysCount = Object.keys(essays).length
-    return { knownCount, accuracy, essaysCount }
+    return { knownCount, seenCount, accuracy, essaysCount }
   }, [])
 
-  const settings = settingsStore.get()
-  const apiReady = !!settings.apiKey
+  const seenCount = serverStats?.seenWords ?? stats.seenCount
+  const knownCount = serverStats?.knownWords ?? stats.knownCount
+  const masteredCount = serverStats?.masteredWords ?? 0
+  const totalForProgress = serverStats?.totalWords ?? vocabTotal
+
+  const [aiReady, setAiReady] = useState<boolean>(false)
+  useEffect(() => {
+    let cancelled = false
+    getAiEnabled().then((b) => {
+      if (!cancelled) setAiReady(b)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const todayWord = previewWords.length
     ? previewWords[new Date().getDate() % previewWords.length]
     : null
@@ -90,37 +128,72 @@ export default function Home() {
           Shanghai Gaokao · English Companion
         </div>
         <h1 className="mt-3 text-4xl md:text-6xl font-semibold tracking-tight leading-[1.05] text-ink-900">
-          慢一点，<br className="hidden md:block" />
-          把英语学得 <span className="text-accent">更踏实</span>。
+          {user ? <>你好，{user.displayName}。<br className="hidden md:block" /></> : null}
+          慢一点，把英语学得 <span className="text-accent">更踏实</span>。
         </h1>
         <p className="mt-5 max-w-2xl text-[16px] leading-relaxed text-ink-500">
           为上海高三学生量身打造的英语练习空间。单词、口语、阅读、作文，四个模块循序渐进，
           每一步都有发音、范例与 AI 反馈陪伴。
         </p>
         <div className="mt-8 flex items-center gap-3">
-          <Link
-            to="/flashcards"
-            className="inline-flex items-center gap-1.5 h-11 px-5 rounded-xl2 bg-ink-900 text-white text-[14px] font-medium hover:bg-ink-700 transition-colors"
-          >
-            开始今天的练习
-            <Icon name="arrow-right" size={16} />
-          </Link>
-          <Link
-            to="/settings"
-            className="inline-flex items-center gap-1.5 h-11 px-5 rounded-xl2 hairline bg-surface text-[14px] text-ink-700 hover:bg-surface-alt transition-colors"
-          >
-            {apiReady ? 'AI 已就绪' : '配置 AI 评价'}
-            <Icon name="chevron-right" size={16} />
-          </Link>
+          {isAuthed ? (
+            <>
+              <Link
+                to="/flashcards"
+                className="inline-flex items-center gap-1.5 h-11 px-5 rounded-xl2 bg-ink-900 text-white text-[14px] font-medium hover:bg-ink-700 transition-colors"
+              >
+                开始今天的练习
+                <Icon name="arrow-right" size={16} />
+              </Link>
+              <Link
+                to="/settings"
+                className="inline-flex items-center gap-1.5 h-11 px-5 rounded-xl2 hairline bg-surface text-[14px] text-ink-700 hover:bg-surface-alt transition-colors"
+              >
+                {aiReady ? 'AI 已就绪' : 'AI 暂未启用'}
+                <Icon name="chevron-right" size={16} />
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-1.5 h-11 px-5 rounded-xl2 bg-ink-900 text-white text-[14px] font-medium hover:bg-ink-700 transition-colors"
+              >
+                登录开始练习
+                <Icon name="arrow-right" size={16} />
+              </Link>
+              <Link
+                to="/flashcards"
+                className="inline-flex items-center gap-1.5 h-11 px-5 rounded-xl2 hairline bg-surface text-[14px] text-ink-700 hover:bg-surface-alt transition-colors"
+              >
+                了解学习模块
+                <Icon name="chevron-right" size={16} />
+              </Link>
+            </>
+          )}
         </div>
       </section>
 
       {/* Stats */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {!isAuthed && (
+        <div className="text-[13px] text-ink-500 bg-surface-alt rounded-xl2 px-4 py-3 hairline">
+          登录后这里会出现你的学习进度·
+          <Link to="/login" className="text-accent hover:underline ml-1">
+            立即登录
+          </Link>
+        </div>
+      )}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard
+          label="背过的单词"
+          value={seenCount}
+          unit={`/ ${totalForProgress}`}
+          hint="至少看过一次的单词数"
+        />
         <StatCard
           label="掌握的单词"
-          value={stats.knownCount}
-          unit={`/ ${vocabTotal}`}
+          value={knownCount}
+          unit={masteredCount ? `(${masteredCount} 熟练)` : ''}
           hint="单词卡中标记为「认识」的累计数量"
         />
         <StatCard
@@ -136,6 +209,36 @@ export default function Home() {
           hint="保持每周一篇的节奏"
         />
       </section>
+
+      {serverStats && serverStats.byLevel.length > 0 && (
+        <section>
+          <h2 className="text-[15px] font-medium text-ink-500 mb-4">分难度进度</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {serverStats.byLevel.map((b) => {
+              const pct = b.total > 0 ? Math.round((b.seen / b.total) * 100) : 0
+              return (
+                <Card padded key={b.level}>
+                  <div className="flex items-baseline justify-between">
+                    <div className="text-[13px] text-ink-500">L{b.level} 词汇</div>
+                    <div className="text-[12px] text-ink-400 num">
+                      {b.seen} / {b.total}
+                    </div>
+                  </div>
+                  <div className="mt-3 h-1.5 rounded-full bg-surface-alt overflow-hidden">
+                    <div
+                      className="h-full bg-accent transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 text-[12px] text-ink-400">
+                    已掌握 <span className="num text-ink-700">{b.known}</span>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Modules */}
       <section>

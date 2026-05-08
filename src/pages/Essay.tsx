@@ -5,7 +5,7 @@ import Button from '../components/Button'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import { ESSAY_PROMPTS } from '../data/essayPrompts'
-import { gradeEssay } from '../lib/claude'
+import { gradeEssay } from '../lib/ai'
 import { essayStore } from '../lib/storage'
 import type { EssayDraft, EssayFeedback } from '../types'
 

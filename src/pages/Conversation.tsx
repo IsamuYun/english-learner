@@ -6,7 +6,7 @@ import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import { CONVERSATION_SCENARIOS } from '../data/conversationScenarios'
 import { listen, speak, speechRecognitionAvailable, stopSpeaking } from '../lib/speech'
-import { ConversationFeedback, evaluateConversationTurn } from '../lib/claude'
+import { ConversationFeedback, evaluateConversationTurn } from '../lib/ai'
 import { settingsStore } from '../lib/storage'
 
 export default function Conversation() {

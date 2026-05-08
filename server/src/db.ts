@@ -64,6 +64,71 @@ const MIGRATIONS: string[] = [
      key   TEXT PRIMARY KEY,
      value TEXT NOT NULL
    );`,
+
+  // ---- users + sessions ----
+  `CREATE TABLE IF NOT EXISTS users (
+     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+     username      TEXT    NOT NULL UNIQUE,
+     display_name  TEXT    NOT NULL,
+     password_hash TEXT    NOT NULL,
+     password_salt TEXT    NOT NULL,
+     created_at    INTEGER NOT NULL
+   );`,
+  `CREATE TABLE IF NOT EXISTS sessions (
+     token       TEXT    PRIMARY KEY,
+     user_id     INTEGER NOT NULL,
+     created_at  INTEGER NOT NULL,
+     expires_at  INTEGER NOT NULL,
+     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+   );`,
+  `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);`,
+
+  // ---- rebuild flashcard_progress with (user_id, word_id) PK ----
+  `CREATE TABLE IF NOT EXISTS flashcard_progress_v2 (
+     user_id        INTEGER NOT NULL,
+     word_id        INTEGER NOT NULL,
+     seen           INTEGER NOT NULL DEFAULT 0,
+     known          INTEGER NOT NULL DEFAULT 0,
+     last_reviewed  INTEGER NOT NULL DEFAULT 0,
+     due            INTEGER NOT NULL DEFAULT 0,
+     bucket         INTEGER NOT NULL DEFAULT 0 CHECK (bucket BETWEEN 0 AND 4),
+     PRIMARY KEY (user_id, word_id),
+     FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
+   );
+   INSERT OR IGNORE INTO flashcard_progress_v2 (user_id, word_id, seen, known, last_reviewed, due, bucket)
+     SELECT 1, word_id, seen, known, last_reviewed, due, bucket FROM flashcard_progress;
+   DROP TABLE flashcard_progress;
+   ALTER TABLE flashcard_progress_v2 RENAME TO flashcard_progress;
+   CREATE INDEX IF NOT EXISTS idx_flashcard_user ON flashcard_progress(user_id);`,
+
+  // ---- add user_id to reading_results ----
+  `ALTER TABLE reading_results ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1;
+   CREATE INDEX IF NOT EXISTS idx_reading_user ON reading_results(user_id, taken_at DESC);`,
+
+  // ---- rebuild essay_drafts with (user_id, week) PK ----
+  `CREATE TABLE IF NOT EXISTS essay_drafts_v2 (
+     user_id     INTEGER NOT NULL,
+     week        INTEGER NOT NULL,
+     text        TEXT    NOT NULL DEFAULT '',
+     updated_at  INTEGER NOT NULL,
+     feedback    TEXT,
+     PRIMARY KEY (user_id, week)
+   );
+   INSERT OR IGNORE INTO essay_drafts_v2 (user_id, week, text, updated_at, feedback)
+     SELECT 1, week, text, updated_at, feedback FROM essay_drafts;
+   DROP TABLE essay_drafts;
+   ALTER TABLE essay_drafts_v2 RENAME TO essay_drafts;`,
+
+  // ---- rebuild settings with (user_id, key) PK ----
+  `CREATE TABLE IF NOT EXISTS settings_v2 (
+     user_id INTEGER NOT NULL,
+     key     TEXT    NOT NULL,
+     value   TEXT    NOT NULL,
+     PRIMARY KEY (user_id, key)
+   );
+   INSERT OR IGNORE INTO settings_v2 (user_id, key, value) SELECT 1, key, value FROM settings;
+   DROP TABLE settings;
+   ALTER TABLE settings_v2 RENAME TO settings;`,
 ]
 
 function currentVersion(): number {

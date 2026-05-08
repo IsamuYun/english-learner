@@ -5,7 +5,7 @@ import Button from '../components/Button'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import { READING_PASSAGES } from '../data/readingPassages'
-import { explainReading } from '../lib/claude'
+import { explainReading } from '../lib/ai'
 import { readingStore } from '../lib/storage'
 
 export default function Reading() {

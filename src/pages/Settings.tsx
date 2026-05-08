@@ -1,36 +1,68 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Card from '../components/Card'
 import Icon from '../components/Icon'
 import Button from '../components/Button'
 import PageHeader from '../components/PageHeader'
-import { defaultSettings, settingsStore } from '../lib/storage'
+import { settingsStore } from '../lib/storage'
 import { getVoices, onVoicesReady, speak } from '../lib/speech'
+import { aiApi, type AiStatus } from '../lib/api'
 import type { AppSettings } from '../types'
 
 export default function Settings() {
   const [s, setS] = useState<AppSettings>(() => settingsStore.get())
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(getVoices())
-  const [showKey, setShowKey] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null)
+  const rateTimer = useRef<number | null>(null)
 
   useEffect(() => {
     onVoicesReady(() => setVoices(getVoices()))
   }, [])
 
-  const update = (patch: Partial<AppSettings>) => setS((cur) => ({ ...cur, ...patch }))
+  useEffect(() => {
+    let cancelled = false
+    aiApi
+      .status()
+      .then((r) => {
+        if (!cancelled) setAiStatus(r)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
-  const save = () => {
-    settingsStore.set(s)
+  const flashSaved = () => {
     setSavedFlash(true)
-    setTimeout(() => setSavedFlash(false), 1600)
+    window.setTimeout(() => setSavedFlash(false), 1200)
   }
 
-  const reset = () => {
-    setS({ ...defaultSettings })
+  const setAndPersist = (patch: Partial<AppSettings>) => {
+    setS((cur) => {
+      const next = { ...cur, ...patch }
+      settingsStore.set(next)
+      return next
+    })
+    flashSaved()
+  }
+
+  const handleVoiceChange = (voiceURI: string) => setAndPersist({ voice: voiceURI })
+
+  const handleRateChange = (rate: number) => {
+    setS((cur) => ({ ...cur, rate }))
+    if (rateTimer.current !== null) window.clearTimeout(rateTimer.current)
+    rateTimer.current = window.setTimeout(() => {
+      const cur = settingsStore.get()
+      settingsStore.set({ ...cur, rate })
+      flashSaved()
+    }, 350)
   }
 
   const test = () => {
-    speak('Reading widely is vital for academic success.', { rate: s.rate, voiceURI: s.voice })
+    speak('Reading widely is vital for academic success.', {
+      rate: s.rate,
+      voiceURI: s.voice,
+    })
   }
 
   return (
@@ -38,53 +70,52 @@ export default function Settings() {
       <PageHeader
         eyebrow="Settings"
         title="设置"
-        description="配置 AI 评价（可选）与语音偏好。所有内容仅保存在本机浏览器中。"
+        description="语音偏好会自动保存到你的账号；AI 评价由项目统一配置，无需个人填写密钥。"
       />
 
-      <Card padded className="space-y-4">
-        <div className="flex items-center justify-between">
+      <Card padded className="space-y-3">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-lg font-semibold tracking-tight">Anthropic API Key</h3>
+            <h3 className="text-lg font-semibold tracking-tight">AI 评价状态</h3>
             <p className="text-[13px] text-ink-500 mt-1">
-              用于 AI 句子点评、口语反馈、阅读讲解与作文批改。未填写时仍可使用基础规则反馈。
+              AI 句子点评、口语反馈、阅读讲解与作文批改由项目统一接入 Google Gemini。
+              未启用时，应用会回退到本地基础规则反馈。
             </p>
           </div>
           <span
             className={[
-              'inline-flex items-center px-2.5 h-7 rounded-full text-[12px]',
-              s.apiKey ? 'bg-good/10 text-good' : 'bg-surface-alt text-ink-500',
+              'shrink-0 inline-flex items-center px-2.5 h-7 rounded-full text-[12px]',
+              aiStatus?.enabled ? 'bg-good/10 text-good' : 'bg-surface-alt text-ink-500',
             ].join(' ')}
           >
-            {s.apiKey ? '已配置' : '未配置'}
+            {aiStatus === null ? '检查中…' : aiStatus.enabled ? '已启用' : '未配置'}
           </span>
         </div>
-        <div className="relative">
-          <input
-            type={showKey ? 'text' : 'password'}
-            value={s.apiKey}
-            onChange={(e) => update({ apiKey: e.target.value })}
-            placeholder="sk-ant-..."
-            className="w-full h-11 rounded-xl hairline bg-surface-warm px-4 pr-20 text-[14px] num focus:bg-surface transition-colors"
-          />
-          <button
-            onClick={() => setShowKey((v) => !v)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 rounded-lg text-[12px] text-ink-500 hover:bg-surface-alt"
-          >
-            {showKey ? '隐藏' : '显示'}
-          </button>
-        </div>
-        <p className="text-[12px] text-ink-400 leading-relaxed">
-          密钥仅保存在你的浏览器（localStorage），调用直接发往 Anthropic 服务器。请使用属于你自己的
-          API Key，并妥善保管。
-        </p>
+        {aiStatus?.enabled && (
+          <p className="text-[12px] text-ink-400 num">模型：{aiStatus.model}</p>
+        )}
+        {aiStatus && !aiStatus.enabled && (
+          <p className="text-[12px] text-ink-400 leading-relaxed">
+            管理员可在服务端 <code className="num">server/.env</code> 中设置{' '}
+            <code className="num">GEMINI_API_KEY</code>，重启服务后即生效。
+          </p>
+        )}
       </Card>
 
       <Card padded className="space-y-5">
-        <div>
-          <h3 className="text-lg font-semibold tracking-tight">语音设置</h3>
-          <p className="text-[13px] text-ink-500 mt-1">
-            选择系统已安装的英文嗓音和语速。中文嗓音可用于将来扩展。
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight">语音设置</h3>
+            <p className="text-[13px] text-ink-500 mt-1">
+              选择浏览器内置嗓音和语速。修改后自动保存，下次登录在任何设备都会沿用。
+            </p>
+          </div>
+          {savedFlash && (
+            <span className="shrink-0 text-[12px] text-good inline-flex items-center gap-1 animate-fadeIn">
+              <Icon name="check" size={12} />
+              已自动保存
+            </span>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -92,7 +123,7 @@ export default function Settings() {
           <div className="relative">
             <select
               value={s.voice}
-              onChange={(e) => update({ voice: e.target.value })}
+              onChange={(e) => handleVoiceChange(e.target.value)}
               className="w-full h-11 rounded-xl hairline bg-surface px-3 pr-9 text-[14px] appearance-none"
             >
               <option value="">使用浏览器默认嗓音</option>
@@ -108,6 +139,9 @@ export default function Settings() {
               className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none"
             />
           </div>
+          <p className="text-[12px] text-ink-400">
+            嗓音对应当前浏览器/系统已安装的语音包；换设备时若未安装相同嗓音将自动回退到默认。
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -121,7 +155,7 @@ export default function Settings() {
             max="1.3"
             step="0.05"
             value={s.rate}
-            onChange={(e) => update({ rate: parseFloat(e.target.value) })}
+            onChange={(e) => handleRateChange(parseFloat(e.target.value))}
             className="w-full accent-accent"
           />
         </div>
@@ -134,21 +168,6 @@ export default function Settings() {
           试听一句
         </Button>
       </Card>
-
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={reset}>
-          恢复默认
-        </Button>
-        <div className="flex items-center gap-3">
-          {savedFlash && (
-            <span className="text-[12.5px] text-good inline-flex items-center gap-1 animate-fadeIn">
-              <Icon name="check" size={14} />
-              已保存
-            </span>
-          )}
-          <Button onClick={save}>保存设置</Button>
-        </div>
-      </div>
     </div>
   )
 }
