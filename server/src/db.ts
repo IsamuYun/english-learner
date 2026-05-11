@@ -129,6 +129,18 @@ const MIGRATIONS: string[] = [
    INSERT OR IGNORE INTO settings_v2 (user_id, key, value) SELECT 1, key, value FROM settings;
    DROP TABLE settings;
    ALTER TABLE settings_v2 RENAME TO settings;`,
+
+  // ---- TTS audio cache ----
+  // Keys an on-disk WAV by sha256(voice + text). Hits skip the CosyVoice call.
+  `CREATE TABLE IF NOT EXISTS tts_cache (
+     hash       TEXT    PRIMARY KEY,
+     voice      TEXT    NOT NULL,
+     text       TEXT    NOT NULL,
+     file_name  TEXT    NOT NULL,
+     byte_size  INTEGER NOT NULL,
+     created_at INTEGER NOT NULL,
+     hit_count  INTEGER NOT NULL DEFAULT 0
+   );`,
 ]
 
 function currentVersion(): number {

@@ -4,13 +4,13 @@ import Icon from '../components/Icon'
 import Button from '../components/Button'
 import PageHeader from '../components/PageHeader'
 import { settingsStore } from '../lib/storage'
-import { getVoices, onVoicesReady, speak } from '../lib/speech'
+import { getVoices, onVoicesReady, speak, type TTSVoice } from '../lib/speech'
 import { aiApi, type AiStatus } from '../lib/api'
 import type { AppSettings } from '../types'
 
 export default function Settings() {
   const [s, setS] = useState<AppSettings>(() => settingsStore.get())
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(getVoices())
+  const [voices, setVoices] = useState<TTSVoice[]>(getVoices())
   const [savedFlash, setSavedFlash] = useState(false)
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null)
   const rateTimer = useRef<number | null>(null)
@@ -107,7 +107,7 @@ export default function Settings() {
           <div>
             <h3 className="text-lg font-semibold tracking-tight">语音设置</h3>
             <p className="text-[13px] text-ink-500 mt-1">
-              选择浏览器内置嗓音和语速。修改后自动保存，下次登录在任何设备都会沿用。
+              选择 CosyVoice 嗓音和语速。修改后自动保存，下次登录在任何设备都会沿用。
             </p>
           </div>
           {savedFlash && (
@@ -119,17 +119,16 @@ export default function Settings() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-[12px] text-ink-500">英文嗓音</label>
+          <label className="text-[12px] text-ink-500">嗓音</label>
           <div className="relative">
             <select
               value={s.voice}
               onChange={(e) => handleVoiceChange(e.target.value)}
               className="w-full h-11 rounded-xl hairline bg-surface px-3 pr-9 text-[14px] appearance-none"
             >
-              <option value="">使用浏览器默认嗓音</option>
               {voices.map((v) => (
-                <option key={v.voiceURI} value={v.voiceURI}>
-                  {v.name} · {v.lang}
+                <option key={v.id} value={v.id}>
+                  {v.label}
                 </option>
               ))}
             </select>
@@ -140,7 +139,7 @@ export default function Settings() {
             />
           </div>
           <p className="text-[12px] text-ink-400">
-            嗓音对应当前浏览器/系统已安装的语音包；换设备时若未安装相同嗓音将自动回退到默认。
+            嗓音由 CosyVoice (FunAudioLLM) 服务端合成，结果会缓存，重复内容直接命中。
           </p>
         </div>
 

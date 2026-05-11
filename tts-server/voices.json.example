@@ -1,0 +1,16 @@
+[
+  {
+    "id": "台湾女",
+    "label": "台灣 · 女聲（曉臻）",
+    "lang": "zh",
+    "prompt_audio": "voices/tw_female.wav",
+    "prompt_text": "今天天氣很好，適合出門走走。"
+  },
+  {
+    "id": "台湾女2",
+    "label": "台灣 · 女聲（曉雨）",
+    "lang": "zh",
+    "prompt_audio": "voices/tw_female_yu.wav",
+    "prompt_text": "下午我們一起去咖啡廳坐坐吧。"
+  }
+]

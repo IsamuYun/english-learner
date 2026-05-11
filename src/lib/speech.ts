@@ -1,44 +1,126 @@
-// Web Speech API helpers — TTS (SpeechSynthesis) + STT (SpeechRecognition).
-// All calls are best-effort: if the browser doesn't support a feature, we fail gracefully.
+// TTS via the backend /api/tts route (CosyVoice). STT still uses the browser's
+// SpeechRecognition. The audio is fetched as a blob (the route requires a
+// bearer token, which <audio src> can't carry), played via an HTMLAudioElement,
+// and kept in a small in-memory LRU keyed on text+voice. Playback rate is
+// applied on the audio element so changing speed never re-hits the model.
+
+import { getAuthToken } from './api'
+
+export interface TTSVoice {
+  id: string
+  label: string
+  lang: string
+}
+
+const DEFAULT_VOICE = '台湾女'
+const MAX_BLOB_CACHE = 50
+
+const blobCache = new Map<string, string>()
+let currentAudio: HTMLAudioElement | null = null
+
+function rememberBlob(key: string, url: string) {
+  blobCache.set(key, url)
+  while (blobCache.size > MAX_BLOB_CACHE) {
+    const oldest = blobCache.keys().next().value
+    if (oldest === undefined) break
+    const u = blobCache.get(oldest)
+    if (u) URL.revokeObjectURL(u)
+    blobCache.delete(oldest)
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+async function fetchAudioUrl(text: string, voice: string): Promise<string | null> {
+  const key = `${voice}${text}`
+  const cached = blobCache.get(key)
+  if (cached) return cached
+  const qs = new URLSearchParams({ text, voice })
+  const res = await fetch(`/api/tts?${qs.toString()}`, { headers: authHeaders() })
+  if (!res.ok) return null
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  rememberBlob(key, url)
+  return url
+}
 
 export function speak(
   text: string,
   opts: { rate?: number; voiceURI?: string; lang?: string } = {},
 ): Promise<void> {
   return new Promise((resolve) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    const trimmed = text.trim()
+    if (!trimmed) {
       resolve()
       return
     }
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text)
-    u.lang = opts.lang ?? 'en-US'
-    u.rate = opts.rate ?? 0.95
-    u.pitch = 1
-    if (opts.voiceURI) {
-      const v = window.speechSynthesis.getVoices().find((x) => x.voiceURI === opts.voiceURI)
-      if (v) u.voice = v
-    }
-    u.onend = () => resolve()
-    u.onerror = () => resolve()
-    window.speechSynthesis.speak(u)
+    stopSpeaking()
+    const voice = opts.voiceURI && opts.voiceURI.trim() ? opts.voiceURI : DEFAULT_VOICE
+    fetchAudioUrl(trimmed, voice)
+      .then((url) => {
+        if (!url) {
+          resolve()
+          return
+        }
+        const audio = new Audio(url)
+        audio.playbackRate = opts.rate ?? 1
+        currentAudio = audio
+        const finish = () => {
+          if (currentAudio === audio) currentAudio = null
+          resolve()
+        }
+        audio.onended = finish
+        audio.onerror = finish
+        audio.play().catch(finish)
+      })
+      .catch(() => resolve())
   })
 }
 
 export function stopSpeaking() {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    window.speechSynthesis.cancel()
+  if (currentAudio) {
+    try {
+      currentAudio.pause()
+      currentAudio.currentTime = 0
+    } catch {
+      /* noop */
+    }
+    currentAudio = null
   }
 }
 
-export function getVoices(): SpeechSynthesisVoice[] {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return []
-  return window.speechSynthesis.getVoices().filter((v) => /^en|zh/i.test(v.lang))
+let voicesCache: TTSVoice[] | null = null
+let voicesPromise: Promise<TTSVoice[]> | null = null
+const voicesListeners = new Set<() => void>()
+
+function loadVoices(): Promise<TTSVoice[]> {
+  if (voicesPromise) return voicesPromise
+  voicesPromise = fetch('/api/tts/voices', { headers: authHeaders() })
+    .then((r) => (r.ok ? (r.json() as Promise<{ voices: TTSVoice[] }>) : { voices: [] }))
+    .then((d) => {
+      voicesCache = d.voices ?? []
+      for (const l of voicesListeners) l()
+      return voicesCache
+    })
+    .catch(() => {
+      voicesCache = []
+      return voicesCache
+    })
+  return voicesPromise
+}
+
+export function getVoices(): TTSVoice[] {
+  if (voicesCache === null) void loadVoices()
+  return voicesCache ?? []
 }
 
 export function onVoicesReady(cb: () => void) {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
-  window.speechSynthesis.onvoiceschanged = cb
+  voicesListeners.add(cb)
+  if (voicesCache !== null) cb()
+  else void loadVoices()
 }
 
 // ---- Speech recognition ----

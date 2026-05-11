@@ -7,7 +7,7 @@ import type {
 import { essaysApi, flashcardsApi, readingApi, settingsApi } from './api'
 
 export const defaultSettings: AppSettings = {
-  voice: '',
+  voice: '台湾女',
   rate: 0.95,
 }
 
@@ -108,7 +108,9 @@ export async function hydrate(): Promise<void> {
       readingApi.list().catch(() => []),
       essaysApi.all().catch(() => ({})),
     ])
-    settingsCache = { ...defaultSettings, ...(s as Partial<AppSettings>) }
+    const merged = { ...defaultSettings, ...(s as Partial<AppSettings>) }
+    if (!merged.voice) merged.voice = defaultSettings.voice
+    settingsCache = merged
     flashcardCache = fc
     readingCache = re
     essayCache = es

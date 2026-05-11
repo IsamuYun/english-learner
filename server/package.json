@@ -9,7 +9,9 @@
     "start": "node dist/index.js",
     "build": "tsc",
     "seed": "tsx src/scripts/seed.ts",
-    "enrich": "tsx src/scripts/enrich.ts"
+    "enrich": "tsx src/scripts/enrich.ts",
+    "tts:clear": "tsx src/scripts/clear-tts-cache.ts",
+    "tts:prewarm": "tsx src/scripts/prewarm-tts.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

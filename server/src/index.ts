@@ -7,6 +7,7 @@ import { wordsRoutes } from './routes/words.js'
 import { progressRoutes } from './routes/progress.js'
 import { authRoutes } from './routes/auth.js'
 import { aiRoutes } from './routes/ai.js'
+import { ttsRoutes } from './routes/tts.js'
 import { registerAuthHook } from './auth.js'
 
 const app = Fastify({ logger: true })
@@ -29,6 +30,7 @@ await app.register(authRoutes)
 await app.register(wordsRoutes)
 await app.register(progressRoutes)
 await app.register(aiRoutes)
+await app.register(ttsRoutes)
 
 app.get('/api/health', async () => ({ ok: true }))
 
