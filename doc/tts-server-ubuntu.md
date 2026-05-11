@@ -19,7 +19,6 @@ Node server  ──fetch──▶  tts-server (:9881)  ──Python──▶  Co
   COSYVOICE_DIR=/opt/cosyvoice/CosyVoice
   COSYVOICE_MODEL_DIR=$COSYVOICE_DIR/pretrained_models/Fun-CosyVoice3-0.5B
   ```
-
 - 服务器上有 `english-learner` 仓库源码（参考 `DEPLOY.md` 第 3 节 clone 到 `/srv/english-learner` 之类的位置）。下面用 `/srv/english-learner/tts-server` 举例。
 - `ffmpeg` 已装（生成参考音频要用）。
 
@@ -124,7 +123,7 @@ After=network.target
 Type=simple
 User=deploy
 Group=deploy
-WorkingDirectory=/srv/english-learner/tts-server
+WorkingDirectory=/opt/english-learner/tts-server
 Environment="COSYVOICE_DIR=/opt/cosyvoice/CosyVoice"
 Environment="COSYVOICE_MODEL_DIR=/opt/cosyvoice/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B"
 Environment="PATH=/opt/cosyvoice/CosyVoice/.venv/bin:/usr/local/bin:/usr/bin:/bin"
@@ -189,11 +188,32 @@ npm run tts:prewarm -- --no-examples         # 只跑单词，跳过例句
 
 跑的时候 tts-server 必须在线（这个脚本通过 `COSYVOICE_URL` 走的）。中断后再跑会自动跳过已缓存的，可以放心 Ctrl-C。
 
-缓存落在 `server/data/tts/` 下，按 sha256 分桶；行索引在 SQLite 的 `tts_cache` 表。要全清：
+缓存落在 `server/data/tts/` 下（生产环境一般通过 `TTS_CACHE_DIR=/var/lib/english-learner/tts` 改到这里），按 sha256 分桶；行索引在 SQLite 的 `tts_cache` 表。要全清：
 
 ```bash
 npm run tts:clear
 ```
+
+### 从开发机把已有缓存搬到服务器
+
+如果本地已经预生成了大量 WAV，不想在服务器上从头再合成一次，直接 rsync 文件即可。**路由会以文件为准** —— 缓存文件存在但 `tts_cache` 没行时，第一次被请求时自动补一行（也可以提前用 `tts:prewarm` 一次性补完，输出会显示 `reindexed: N`）。
+
+```bash
+# 本机（项目根）
+rsync -avz --progress \
+  server/data/tts/ \
+  deploy@prod:/var/lib/english-learner/tts/
+
+# 服务器（可选，提前补 DB 索引；不跑也行，首次访问会自动补）
+cd /srv/english-learner/server
+npm run tts:prewarm -- --voice=all
+# 期望输出：reindexed: ~2700  synthesized: 0
+```
+
+> **前提**：
+> - 两端 `voices.json`（id / prompt_audio / prompt_text）和 `TTS_VOICES` 完全一致，否则 hash 算出来不一样，rsync 过去的文件路径对不上
+> - 服务器 `.env` 里的 `TTS_CACHE_DIR` 和 rsync 的目标路径一致
+> - 目标目录的 owner 是跑 Node 的那个用户（一般是 `deploy`）：`sudo chown -R deploy:deploy /var/lib/english-learner/tts`
 
 ---
 
@@ -215,14 +235,14 @@ journalctl -u tts-server -n 200 --no-pager
 
 **常见问题**：
 
-| 现象 | 排查 |
-| --- | --- |
-| 启动报 `set COSYVOICE_DIR to the cloned CosyVoice repo path` | systemd 的 `Environment=` 没生效，`systemctl cat tts-server` 检查 |
-| `voices.json not found` | 路径不对；`WorkingDirectory` 必须是 `tts-server/` 这一级 |
-| 返回 503 `tts-unavailable`（Node 侧） | tts-server 没起 / 起没起来；`curl 127.0.0.1:9881/health` 复测 |
-| 合成出来音色不像 | 参考 WAV 质量决定上限。换更长（5–10 秒）、更干净的人声样本到 `voices/` 重启服务 |
-| `CUDA out of memory` | 当前 GPU 上有别的进程；`nvidia-smi` 找占用方；或者上小一点的 GPU 跑 CPU 模式（极慢，不推荐） |
-| 第一次请求很慢，后续才正常 | 正常 —— 第一次会触发 JIT 编译和图初始化。预热可以在启动后 `curl /tts` 喂一条短文 |
+| 现象                                                           | 排查                                                                                           |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 启动报 `set COSYVOICE_DIR to the cloned CosyVoice repo path` | systemd 的 `Environment=` 没生效，`systemctl cat tts-server` 检查                          |
+| `voices.json not found`                                      | 路径不对；`WorkingDirectory` 必须是 `tts-server/` 这一级                                   |
+| 返回 503 `tts-unavailable`（Node 侧）                        | tts-server 没起 / 起没起来；`curl 127.0.0.1:9881/health` 复测                                |
+| 合成出来音色不像                                               | 参考 WAV 质量决定上限。换更长（5–10 秒）、更干净的人声样本到 `voices/` 重启服务             |
+| `CUDA out of memory`                                         | 当前 GPU 上有别的进程；`nvidia-smi` 找占用方；或者上小一点的 GPU 跑 CPU 模式（极慢，不推荐） |
+| 第一次请求很慢，后续才正常                                     | 正常 —— 第一次会触发 JIT 编译和图初始化。预热可以在启动后 `curl /tts` 喂一条短文           |
 
 ---
 

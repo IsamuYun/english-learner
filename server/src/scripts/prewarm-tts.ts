@@ -71,6 +71,7 @@ async function main() {
 
   let done = 0
   let hits = 0
+  let reindexed = 0
   let misses = 0
   let errors = 0
   const t0 = Date.now()
@@ -81,12 +82,15 @@ async function main() {
       try {
         const t = Date.now()
         const status = await prewarmOne(text, voice)
+        const preview = text.length > 60 ? text.slice(0, 57) + '...' : text
         if (status === 'hit') {
           hits++
+        } else if (status === 'reindex') {
+          reindexed++
+          console.log(`[${done}/${total}] =${voice} (reindex) ${preview}`)
         } else {
           misses++
           const ms = Date.now() - t
-          const preview = text.length > 60 ? text.slice(0, 57) + '...' : text
           console.log(`[${done}/${total}] +${voice} (${ms}ms) ${preview}`)
         }
       } catch (e) {
@@ -100,7 +104,7 @@ async function main() {
 
   const secs = ((Date.now() - t0) / 1000).toFixed(1)
   console.log(
-    `\ndone in ${secs}s  cached: ${hits}  synthesized: ${misses}  errors: ${errors}`,
+    `\ndone in ${secs}s  cached: ${hits}  reindexed: ${reindexed}  synthesized: ${misses}  errors: ${errors}`,
   )
   if (errors > 0) process.exit(1)
 }
